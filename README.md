@@ -2,6 +2,10 @@
 
 > An **ultra-optimized** integration between C++ (llama.cpp) and Python, created by the Polaris team to run AI models with maximum performance.
 
+🔗 **Protocol:** [XCT — Execution Control Transfer](https://github.com/Tech-Tweakers/xct)
+
+🤖 **Model:** [XCT-Qwen3-4B-Q5 on HuggingFace](https://huggingface.co/tech-tweakers/XCT-Qwen3-4B-v0.1.0-q5_k)
+
 ---
 
 ## 📋 Table of Contents
