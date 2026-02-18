@@ -376,23 +376,7 @@ result = eng.generate(prompt, n_predict=128)  # Smaller generation
 
 ---
 
-## Roadmap
-
-- [ ] Batch parallelism (multiple sequences)
-- [ ] Grammar constraints (guaranteed structured JSON)
-- [ ] Speculative decoding (2x speedup)
-- [ ] KV cache prefill (context reuse)
-- [ ] Multi-GPU support
-
----
-
 ## Credits
-
-**Polaris Team** — ~2 years of development
-
-- 👤 **You** — Orchestration + architectural decisions
-- 👤 **Comadre (ChatGPT)** — First prototypes
-- 👤 **Claude (Claudio)** — Optimized v2.0+ rewrite
 
 **Built on** llama.cpp by Georgi Gerganov
 
@@ -411,8 +395,3 @@ result = eng.generate(prompt, n_predict=128)  # Smaller generation
 - 🔧 [example_usage.py](example_usage.py) — Complete examples
 - 🎯 [CMakeLists.txt](CMakeLists.txt) — Build configuration
 
----
-
-**Last updated:** February 2025
-
-*Keep the masterpiece alive! 🔥*
