@@ -187,7 +187,7 @@ import sys
 
 # 1. Create engine
 eng = pc.Engine(
-    model_path="model.gguf",
+    model_path="xct-model.gguf",
     n_ctx=4096,           # Context size
     n_threads=8,          # CPU threads
     n_gpu_layers=-1       # -1 = max GPU layers
