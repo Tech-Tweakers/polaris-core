@@ -4,7 +4,7 @@
 
 🔗 **Protocol:** [XCT — Execution Control Transfer](https://github.com/Tech-Tweakers/xct)
 
-🤖 **Model:** [XCT-Qwen3-4B-Q5 on HuggingFace](https://huggingface.co/tech-tweakers/XCT-Qwen3-4B-v0.1.0-q5_k)
+🤖 **Model:** [XCT-Qwen3-4B on HuggingFace](https://huggingface.co/tech-tweakers/XCT-Qwen3-4B)
 
 ---
 
