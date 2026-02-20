@@ -17,6 +17,7 @@
 - [How to Use](#how-to-use)
 - [Legacy](#legacy)
 - [Performance](#performance)
+- [License](#license)
 
 ---
 
@@ -384,7 +385,9 @@ result = eng.generate(prompt, n_predict=128)  # Smaller generation
 
 ## License
 
-[TBD — To be defined per project]
+This project is licensed under the **Apache License 2.0** — see the [LICENSE](LICENSE) file for details.
+
+Built on [llama.cpp](https://github.com/ggerganov/llama.cpp) (MIT License)
 
 ---
 
