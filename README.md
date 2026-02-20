@@ -130,7 +130,7 @@ Complete deployment guide:
 
 #### `legacy/`
 Historical code (v1.0):
-- `polaris_gen.cpp` — Generic CLI (2 years ago)
+- `polaris_gen.cpp` — Generic CLI
 - Kept as educational reference
 
 ---
