@@ -1,4 +1,4 @@
-# 🚀 Polaris Core — C++ Binding for llama.cpp
+# Polaris Core — C++ Binding for llama.cpp
 
 > An **ultra-optimized** integration between C++ (llama.cpp) and Python, created by the Polaris team to run AI models with maximum performance.
 
