@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ============================
 # Paths: llama.cpp root + build selection
 # ============================
-set(LLAMA_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../llama.cpp-latest)
+set(LLAMA_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 
 option(POLARIS_ENABLE_CUDA "Enable CUDA backend" OFF)
 
@@ -31,14 +31,11 @@ message(STATUS "Using llama bin dir:   ${LLAMA_BIN_DIR}")
 find_package(pybind11 REQUIRED)
 
 # ============================
-# Python module
+# Python module (xct-server: only polaris_bind.cpp)
 # ============================
 pybind11_add_module(polaris_core
   polaris_bind.cpp
 )
-
-
-
 
 # ============================
 # Includes (llama headers)
@@ -65,11 +62,8 @@ target_compile_options(polaris_core PRIVATE
 find_package(Threads REQUIRED)
 
 # ============================
-# Standalone linking (IMPORTANT)
-# We link against compiled shared libs in build-cpu/bin or build-gpu/bin
+# Standalone linking
 # ============================
-
-# Tell linker where libs are
 target_link_directories(polaris_core PRIVATE
   ${LLAMA_BIN_DIR}
 )
@@ -92,7 +86,6 @@ target_link_libraries(polaris_core PRIVATE
   ${CMAKE_DL_LIBS}
 )
 
-
 # Optional CUDA backend
 if(POLARIS_ENABLE_CUDA)
   target_link_libraries(polaris_core PRIVATE ggml-cuda)
@@ -104,7 +97,7 @@ endif()
 # ============================
 set_target_properties(polaris_core PROPERTIES
   BUILD_RPATH   "${LLAMA_BIN_DIR}"
-  INSTALL_RPATH "${LLAMA_BIN_DIR}"
+  INSTALL_RPATH "$ORIGIN/polaris_libs"
 )
 
-message(STATUS "✅ Polaris-Core standalone configured successfully!")
+message(STATUS "Polaris-Core (xct-server) configured successfully!")

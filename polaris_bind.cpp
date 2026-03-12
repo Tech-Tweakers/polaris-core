@@ -24,15 +24,15 @@
 namespace py = pybind11;
 
 struct PolarisEngine {
-    common_params          params;
-    common_init_result     init;
+    common_params              params;
+    common_init_result_ptr     init;
     size_t n_past = 0;
     llama_model          * model = nullptr;
     llama_context        * ctx   = nullptr;
     const llama_vocab    * vocab = nullptr;
     int safety_margin = 16;
 
-    std::unique_ptr<common_sampler, void(*)(common_sampler*)> smpl{nullptr, common_sampler_free};
+    common_sampler_ptr smpl;
     common_chat_templates_ptr chat_tmpl;
 
     std::mutex mtx;
@@ -88,8 +88,8 @@ struct PolarisEngine {
         common_init();
         init  = common_init_from_params(params);
 
-        model = init.model.get();
-        ctx   = init.context.get();
+        model = init->model();
+        ctx   = init->context();
 
         if (!model || !ctx)
             throw std::runtime_error("Falha ao carregar modelo/contexto");
@@ -107,12 +107,8 @@ struct PolarisEngine {
             throw std::runtime_error("Falha ao inicializar sampler");
     }
 
-    ~PolarisEngine() {
-        llama_backend_free();
-    }
-
-    struct SamplerCfg { float temp, top_p, rep; };
-    SamplerCfg last_cfg{ -1.f, -1.f, -1.f };
+    struct SamplerCfg { float temp, top_p, rep, topk, minp, freq, pres; int seed; };
+    SamplerCfg last_cfg{ -1.f, -1.f, -1.f, -1.f, -1.f, -1.f, -1.f, -1 };
 
     std::string generate(const std::string & prompt,
                          const std::string & system_prompt,
@@ -120,6 +116,11 @@ struct PolarisEngine {
                          double temperature,
                          double top_p,
                          double repeat_penalty,
+                         int    top_k,
+                         double min_p,
+                         double penalty_freq,
+                         double penalty_present,
+                         int    seed,
                          py::object py_callback) {
         std::lock_guard<std::mutex> lock(mtx);
 
@@ -148,13 +149,30 @@ struct PolarisEngine {
         const bool force_no_spec = !getenv_bool("POLARIS_USE_SPECIALS", true);
         const std::string STAGE  = getenv_str("POLARIS_STAGE"); // "", "prompt","tokenize","prefill","sample","piece","push"
 
-        params.n_predict               = n_predict > 0 ? n_predict : 256;
-        params.sampling.temp           = (float) (temperature    > 0.0 ? temperature    : 0.7);
-        params.sampling.top_p          = (float) (top_p          > 0.0 ? top_p          : 0.9);
-        params.sampling.penalty_repeat = (float) (repeat_penalty > 0.0 ? repeat_penalty : 1.1);
+        params.n_predict                 = n_predict > 0 ? n_predict : 256;
+        params.sampling.temp             = (float)(temperature     > 0.0  ? temperature     : 0.7);
+        params.sampling.top_p            = (float)(top_p           > 0.0  ? top_p           : 0.9);
+        params.sampling.penalty_repeat   = (float)(repeat_penalty  > 0.0  ? repeat_penalty  : 1.1);
+        params.sampling.top_k            = top_k > 0 ? top_k : 40;
+        params.sampling.min_p            = (float)(min_p           >= 0.0 ? min_p           : 0.05);
+        params.sampling.penalty_freq     = (float)(penalty_freq    >= 0.0 ? penalty_freq    : 0.0);
+        params.sampling.penalty_present  = (float)(penalty_present >= 0.0 ? penalty_present : 0.0);
+        if (seed >= 0) params.sampling.seed = (uint32_t)seed;
 
-        SamplerCfg cfg{ params.sampling.temp, params.sampling.top_p, params.sampling.penalty_repeat };
-        if (!smpl || cfg.temp != last_cfg.temp || cfg.top_p != last_cfg.top_p || cfg.rep != last_cfg.rep) {
+        SamplerCfg cfg{
+            params.sampling.temp,
+            params.sampling.top_p,
+            params.sampling.penalty_repeat,
+            (float)params.sampling.top_k,
+            params.sampling.min_p,
+            params.sampling.penalty_freq,
+            params.sampling.penalty_present,
+            seed
+        };
+        if (!smpl || cfg.temp != last_cfg.temp || cfg.top_p != last_cfg.top_p ||
+            cfg.rep != last_cfg.rep || cfg.topk != last_cfg.topk ||
+            cfg.minp != last_cfg.minp || cfg.freq != last_cfg.freq ||
+            cfg.pres != last_cfg.pres || cfg.seed != last_cfg.seed) {
             smpl.reset(common_sampler_init(model, params.sampling));
             if (!smpl) throw std::runtime_error("Falha ao (re)configurar sampler");
             last_cfg = cfg;
@@ -481,11 +499,16 @@ PYBIND11_MODULE(polaris_core, m) {
         .def("generate",
              &PolarisEngine::generate,
              py::arg("prompt"),
-             py::arg("system_prompt") = "",
-             py::arg("n_predict") = 256,
-             py::arg("temperature") = 0.7,
-             py::arg("top_p") = 0.9,
-             py::arg("repeat_penalty") = 1.1,
-             py::arg("callback") = py::none(),
+             py::arg("system_prompt")    = "",
+             py::arg("n_predict")        = 256,
+             py::arg("temperature")      = 0.7,
+             py::arg("top_p")            = 0.9,
+             py::arg("repeat_penalty")   = 1.1,
+             py::arg("top_k")            = 40,
+             py::arg("min_p")            = 0.05,
+             py::arg("penalty_freq")     = 0.0,
+             py::arg("penalty_present")  = 0.0,
+             py::arg("seed")             = -1,
+             py::arg("callback")         = py::none(),
              "Gera texto; se callback for passado, faz streaming por chunk.");
 }
