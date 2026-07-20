@@ -76,6 +76,7 @@ target_link_directories(polaris_core PRIVATE
 
 # Link core libs (NO "common", it's not a shared lib)
 find_package(CURL REQUIRED)
+find_package(OpenSSL REQUIRED)  # libcommon.a (httplib) puxa X509_* do OpenSSL
 
 target_link_libraries(polaris_core PRIVATE
   llama
@@ -88,6 +89,8 @@ target_link_libraries(polaris_core PRIVATE
   "-Wl,--no-whole-archive"
 
   CURL::libcurl
+  OpenSSL::SSL
+  OpenSSL::Crypto
   Threads::Threads
   ${CMAKE_DL_LIBS}
 )
