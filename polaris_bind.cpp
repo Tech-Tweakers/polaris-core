@@ -258,7 +258,7 @@ struct PolarisEngine {
         // pré-fechado faz o modelo concluir que o turno acabou e emitir
         // EOS de cara (decode: 0 toks, resposta vazia). Por isso é opt-in:
         // ligue POLARIS_SUPPRESS_THINK=1 só ao servir um modelo 3.5.
-        if (getenv_bool("POLARIS_SUPPRESS_THINK", false)) {
+        if (env_bool("POLARIS_SUPPRESS_THINK", false)) {
             prompt_text += "<think>\n\n</think>\n";
         }
 
