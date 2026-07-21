@@ -226,6 +226,17 @@ struct PolarisEngine {
             smpl.reset(common_sampler_init(model, params.sampling));
             if (!smpl) throw std::runtime_error("Falha ao (re)configurar sampler");
             last_cfg = cfg;
+        } else {
+            // Config igual à da chamada anterior: o sampler é REUSADO — e ele
+            // carrega estado. A janela de penalidade (repeat/freq/presence)
+            // guarda os últimos N tokens gerados, e mais abaixo alimentamos o
+            // prompt inteiro com common_sampler_accept(). Sem limpar, a geração
+            // nova começa penalizando tokens do turno ANTERIOR.
+            //
+            // O sintoma é característico: uma resposta boa, a seguinte ruim,
+            // alternando — porque a config só muda de vez em quando e, quando
+            // muda, o sampler é recriado limpo por acaso.
+            common_sampler_reset(smpl.get());
         }
 
         // ================================
