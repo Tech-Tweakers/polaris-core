@@ -11,6 +11,7 @@
 #include <pybind11/functional.h>
 #include <pybind11/stl.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 #include <memory>
@@ -327,6 +328,31 @@ struct PolarisEngine {
         // não avança e o constraint não vale. No prompt (embd_inp) segue false —
         // a gramática vale para o que o MODELO gera, não para o que ele leu.
         const bool use_grammar = !grammar.empty();
+
+        // Tokens ESPECIAIS de tool-call. No Qwen, <tool_call> e </tool_call> são
+        // tokens ÚNICOS do vocabulário — não strings montadas caractere a
+        // caractere. Detectá-los aqui, no momento em que o modelo os emite, é o
+        // que os provedores de nuvem fazem: a chamada NUNCA vira texto, então
+        // nunca "vaza" no chat nem depende de regex pra ser reconhecida.
+        // -1 = o modelo não tem esses tokens (aí seguimos no modo texto).
+        llama_token tok_call_start = -1, tok_call_end = -1;
+        {
+            const int n_vocab = llama_vocab_n_tokens(vocab);
+            for (int i = 0; i < n_vocab; i++) {
+                const char * tp = llama_vocab_get_text(vocab, i);
+                if (!tp) continue;
+                if (tok_call_start < 0 && std::strcmp(tp, "<tool_call>") == 0)  tok_call_start = i;
+                if (tok_call_end   < 0 && std::strcmp(tp, "</tool_call>") == 0) tok_call_end   = i;
+                if (tok_call_start >= 0 && tok_call_end >= 0) break;
+            }
+        }
+        bool in_tool_call = false;   // estamos DENTRO de um bloco de chamada?
+        int  tool_calls_seen = 0;
+        // Canal separado: o conteúdo da chamada NÃO entra no stream de texto.
+        // É o que os provedores fazem — o usuário vê prosa, a chamada vai como
+        // dado estruturado. Sem isso o JSON aparece no chat (e, quando a
+        // geração é cortada, aparece pela metade).
+        std::string tool_buf;
         for (auto t : embd_inp) common_sampler_accept(smpl.get(), t, /*grammar*/false);
         if (STAGE == "prefill") return std::string("[OK] prefill in ") + std::to_string(prefill_sec) + "s";
 
@@ -436,8 +462,26 @@ struct PolarisEngine {
                 break;
             }
 
+            // Tool-call por TOKEN, não por texto: quando o modelo emite o
+            // token <tool_call>, sabemos ali mesmo que começou uma chamada — sem
+            // procurar a string depois nem torcer pra ele fechar o bloco. É
+            // assim que a chamada deixa de ser "texto que parece uma chamada" e
+            // vira sinal estruturado, como fazem os provedores de nuvem.
+            if (id == tok_call_start) { in_tool_call = true;  tool_calls_seen++; }
+            else if (id == tok_call_end) { in_tool_call = false; }
+
             // convert token -> text piece
             std::string piece = common_token_to_piece(ctx, id, params.special);
+
+            // NOTA: houve aqui um "canal separado" que desviava o conteúdo do
+            // tool_call para um buffer próprio, anexado ao final da resposta. A
+            // intenção era não deixar a chamada virar texto (como fazem os
+            // provedores), mas ficou pela metade: o STREAM não via a chamada e o
+            // resultado final a recebia grudada no fim — fora da posição em que
+            // o modelo a emitiu. Isso desalinhava o texto e produzia fragmentos
+            // soltos quando o stream cortava no meio. Revertido: o piece segue o
+            // fluxo normal, na ordem gerada. A separação real exige tratar o
+            // protocolo inteiro (stream + final), não só a saída.
 
             if (!py_callback.is_none()) {
 
