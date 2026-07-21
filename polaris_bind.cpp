@@ -248,20 +248,45 @@ struct PolarisEngine {
 
         std::string prompt_text;
 
-        for (const auto & m : messages) {
-            if (m.second.empty()) continue;
-            // Papel fora do ChatML vira "user": o Qwen so conhece
-            // system/user/assistant, e um papel inventado quebra o trilho.
-            std::string role = m.first;
-            if (role != "system" && role != "user" && role != "assistant") role = "user";
-            prompt_text += "<|im_start|>";
-            prompt_text += role;
-            prompt_text += "\n";
-            prompt_text += m.second;
-            prompt_text += "\n<|im_end|>\n";
+        // POLARIS_JINJA=1: monta o prompt com o CHAT TEMPLATE do proprio GGUF
+        // (o mesmo caminho do llama-server --jinja), em vez do ChatML na mao.
+        // Provado em 21/07: o mesmo 9B era instavel via ChatML manual e ficou
+        // redondo via template nativo. O fim do prompt (o gatilho do primeiro
+        // token) sai EXATAMENTE como o modelo foi treinado a ver. Dial pra
+        // comparar lado a lado e poder voltar; o manual segue como fallback.
+        const bool use_jinja = env_bool("POLARIS_JINJA", false);
+        if (use_jinja) {
+            static common_chat_templates_ptr tmpls;
+            if (!tmpls) tmpls = common_chat_templates_init(model, "");
+            common_chat_templates_inputs inputs;
+            inputs.add_generation_prompt = true;
+            inputs.use_jinja = true;
+            for (const auto & m : messages) {
+                if (m.second.empty()) continue;
+                std::string role = m.first;
+                if (role != "system" && role != "user" && role != "assistant") role = "user";
+                common_chat_msg msg;
+                msg.role = role;
+                msg.content = m.second;
+                inputs.messages.push_back(msg);
+            }
+            common_chat_params ap = common_chat_templates_apply(tmpls.get(), inputs);
+            prompt_text = ap.prompt;
+        } else {
+            for (const auto & m : messages) {
+                if (m.second.empty()) continue;
+                // Papel fora do ChatML vira "user": o Qwen so conhece
+                // system/user/assistant, e um papel inventado quebra o trilho.
+                std::string role = m.first;
+                if (role != "system" && role != "user" && role != "assistant") role = "user";
+                prompt_text += "<|im_start|>";
+                prompt_text += role;
+                prompt_text += "\n";
+                prompt_text += m.second;
+                prompt_text += "\n<|im_end|>\n";
+            }
+            prompt_text += "<|im_start|>assistant\n";
         }
-
-        prompt_text += "<|im_start|>assistant\n";
 
         // Dial por MODELO, não global: a família Qwen3.5 emite bloco
         // <think> espontaneamente; injetar um <think></think> vazio e já
