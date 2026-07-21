@@ -4,8 +4,8 @@ Exemplo de uso do polaris_core em um projeto Python
 Este arquivo mostra como configurar o ambiente para usar o polaris_core
 """
 
-import sys
 import os
+import sys
 
 # ============================================================
 # Configuração do ambiente (copie esta parte para seu projeto)
@@ -65,14 +65,14 @@ def exemplo_basico():
     print("✅ Engine inicializado!")
 
     # Callback para streaming
-    def on_chunk(chunk: bytes):
+    def on_chunk(chunk: bytes) -> None:
         """Callback chamado a cada chunk de texto gerado"""
         print(chunk.decode("utf-8", errors="ignore"), end="", flush=True)
 
     print("\n📝 Gerando texto...\n")
 
     # Gerar texto
-    resultado = eng.generate(
+    eng.generate(
         prompt="Conte um causo curtinho de vaqueiro.",
         system_prompt="",  # vazio = sem template de chat
         n_predict=120,  # número máximo de tokens
@@ -106,7 +106,7 @@ def exemplo_sem_streaming():
         temperature=0.7,
     )
 
-    print(resultado)
+    print(resultado if resultado else "")
     print("\n✅ Geração concluída!")
 
 
@@ -128,7 +128,7 @@ def exemplo_cpu_apenas():
 
     resultado = eng.generate(prompt="O que é Python?", n_predict=50)
 
-    print(resultado)
+    print(resultado if resultado else "")
     print("\n✅ Geração concluída!")
 
 

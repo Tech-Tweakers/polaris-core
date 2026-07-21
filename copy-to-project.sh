@@ -9,7 +9,11 @@ if [ -z "$1" ]; then
 fi
 
 DEST_DIR="$1"
-BUILD_DIR="$(cd "$(dirname "$0")/../../build/bin" && pwd)"
+BUILD_DIR="${POLARIS_BUILD_DIR:-$(cd "$(dirname "$0")/build" && pwd 2>/dev/null)}"
+if [ ! -d "$BUILD_DIR" ]; then
+    # fallback legacy layout
+    BUILD_DIR="$(cd "$(dirname "$0")/../../build/bin" 2>/dev/null && pwd)"
+fi
 
 if [ ! -d "$DEST_DIR" ]; then
     echo "❌ Erro: diretório de destino não existe: $DEST_DIR"

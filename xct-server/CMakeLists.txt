@@ -10,7 +10,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ============================
 # Paths: llama.cpp root + build selection
 # ============================
-set(LLAMA_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+if(DEFINED ENV{POLARIS_LLAMA_ROOT})
+  set(LLAMA_ROOT "$ENV{POLARIS_LLAMA_ROOT}")
+else()
+  set(LLAMA_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../llama.cpp-latest)
+endif()
+if(NOT EXISTS "${LLAMA_ROOT}")
+  message(FATAL_ERROR "llama.cpp root not found: ${LLAMA_ROOT}. Set POLARIS_LLAMA_ROOT.")
+endif()
 
 option(POLARIS_ENABLE_CUDA "Enable CUDA backend" OFF)
 
@@ -34,7 +41,7 @@ find_package(pybind11 REQUIRED)
 # Python module (xct-server: only polaris_bind.cpp)
 # ============================
 pybind11_add_module(polaris_core
-  polaris_bind.cpp
+  ../polaris_bind.cpp
 )
 
 # ============================
