@@ -6,9 +6,14 @@
 set -e
 
 POLARIS_CORE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-LLAMA_ROOT="/home/atorres/dev/polaris/llama.cpp-latest"
-XCT_SERVER_DIR="/home/atorres/dev/polaris/xct-server"
-POLARIS_DIR="$LLAMA_ROOT/examples/polaris"
+LLAMA_ROOT="${POLARIS_LLAMA_ROOT:-$HOME/dev/polaris/llama.cpp-latest}"
+XCT_SERVER_DIR="${POLARIS_XCT_SERVER_DIR:-$HOME/dev/polaris/xct-server}"
+POLARIS_DIR="${POLARIS_BUILD_DIR:-$LLAMA_ROOT/examples/polaris}"
+
+if [ ! -d "$LLAMA_ROOT" ]; then
+  echo "❌ LLAMA_ROOT não encontrado: $LLAMA_ROOT"
+  exit 1
+fi
 
 echo "============================================"
 echo "  Polaris Core — xct-server build"
@@ -25,9 +30,9 @@ cd "$LLAMA_ROOT"
 rm -rf build-gpu && mkdir build-gpu && cd build-gpu
 cmake .. -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.2/bin/nvcc \
-  -DCUDAToolkit_ROOT=/usr/local/cuda-12.2
-make -j$(nproc)
+  -DCMAKE_CUDA_COMPILER="${CUDA_COMPILER:-/usr/local/cuda-12.2/bin/nvcc}" \
+  -DCUDAToolkit_ROOT="${CUDAToolkit_ROOT:-/usr/local/cuda-12.2}"
+make -j"$(nproc)"
 
 # ── Step 2: Copia arquivos do polaris-core para examples/polaris ──
 echo ""
@@ -42,7 +47,7 @@ echo "[3/4] Compilando polaris_core (CUDA)..."
 cd "$POLARIS_DIR"
 rm -rf build && mkdir build && cd build
 cmake .. -DPOLARIS_ENABLE_CUDA=ON
-make -j$(nproc)
+make -j"$(nproc)"
 
 # ── Step 4: Copia .so + libs para xct-server ──
 echo ""
@@ -61,8 +66,10 @@ cp "$LLAMA_ROOT/build-gpu/bin/libggml"*.so*    "$LIBS_DEST/" 2>/dev/null || true
 # configura RPATH no .so
 if command -v patchelf &> /dev/null; then
   echo "  Configurando RPATH com patchelf..."
+  # shellcheck disable=SC2016
   patchelf --set-rpath '$ORIGIN/polaris_libs' "$DEST/polaris_core.so"
   for lib in "$LIBS_DEST"/lib*.so; do
+    # shellcheck disable=SC2016
     patchelf --set-rpath '$ORIGIN' "$lib" 2>/dev/null || true
   done
 fi

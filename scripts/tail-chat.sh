@@ -6,8 +6,10 @@
 #
 #   ./tail-chat.sh          # segue ao vivo
 #   ./tail-chat.sh 20       # as últimas 20 entradas e sai
+# shellcheck disable=SC2029
+
 HOST="${POLARIS_HOST:-blacksun}"
-LOG='~/dev/polaris/polaris-v3-api/polaris.log'
+LOG="${POLARIS_LOG:-$HOME/dev/polaris/polaris-v3-api/polaris.log}"
 N="${1:-}"
 FILTER='grep --line-buffered -E "📜 chat \(|\[assistant\] .*tool_call|🛠️ Tool call|decode: [0-9]+ toks"'
 if [[ -n "$N" ]]; then

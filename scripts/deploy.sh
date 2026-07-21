@@ -11,6 +11,8 @@
 #   ./deploy.sh all          # os dois
 #   ./deploy.sh api --no-restart
 set -euo pipefail
+# shellcheck disable=SC2029
+# SERVICE and HOST are intentionally expanded on the client side before SSH.
 
 HOST="${POLARIS_HOST:-blacksun}"
 SERVICE="${POLARIS_SERVICE:-polaris-api}"
@@ -40,7 +42,8 @@ deploy_api() {
   ssh "$HOST" 'cd ~/dev/polaris/polaris-v3-api && git pull --ff-only' | sed 's/^/  /'
   ok "código atualizado"
   if (( RESTART )); then
-    ssh "$HOST" "sudo systemctl restart $SERVICE" && ok "$SERVICE reiniciado"
+    # shellcheck disable=SC2029
+    ssh "$HOST" "sudo systemctl restart ${SERVICE}" && ok "$SERVICE reiniciado"
     sleep 3
     if curl -sf "http://$HOST:8000/v1/models" >/dev/null 2>&1; then
       ok "respondendo em /v1/models"
@@ -71,6 +74,7 @@ deploy_core() {
     done' | sed 's/^/  /'
   ok "bind instalado onde a API carrega"
   if (( RESTART )); then
+    # shellcheck disable=SC2029
     ssh "$HOST" "sudo systemctl restart $SERVICE" && ok "$SERVICE reiniciado (carrega o .so novo)"
   fi
 }
@@ -78,7 +82,8 @@ deploy_core() {
 case "$TARGET" in
   api)  deploy_api ;;
   core) deploy_core ;;
-  all)  deploy_core; RESTART=0; deploy_api; ssh "$HOST" "sudo systemctl restart $SERVICE" && ok "reiniciado" ;;
+  all)  deploy_core; RESTART=0; deploy_api; # shellcheck disable=SC2029
+        ssh "$HOST" "sudo systemctl restart $SERVICE" && ok "reiniciado" ;;
   *)    echo "uso: $0 [api|core|all] [--no-restart]"; exit 1 ;;
 esac
 say "pronto."

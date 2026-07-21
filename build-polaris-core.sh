@@ -1,9 +1,19 @@
 #!/bin/bash
+# Build script for polaris-core.
+# Set POLARIS_LLAMA_ROOT, POLARIS_CORE_DIR, POLARIS_V3_API_DIR to override defaults.
+
 set -e
 
-LLAMA_DIR=/home/atorres/dev/polaris/llama.cpp-latest
-POLARIS_DIR=/home/atorres/dev/polaris/polaris-core
-V3_API=/home/atorres/dev/polaris/polaris-v3-api/polaris_api/polaris_core
+LLAMA_DIR="${POLARIS_LLAMA_ROOT:-$HOME/dev/polaris/llama.cpp-latest}"
+POLARIS_DIR="${POLARIS_CORE_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+V3_API="${POLARIS_V3_API_DIR:-$HOME/dev/polaris/polaris-v3-api/polaris_api/polaris_core}"
+
+for D in "$LLAMA_DIR" "$POLARIS_DIR"; do
+  if [ ! -d "$D" ]; then
+    echo "❌ Diretório não encontrado: $D"
+    exit 1
+  fi
+done
 
 # ============================================================
 # STEP 1: Compile llama.cpp-latest (GPU + CPU)
@@ -17,11 +27,11 @@ cmake .. \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_SHARED_LIBS=ON \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.2/bin/nvcc \
-  -DCUDAToolkit_ROOT=/usr/local/cuda-12.2 \
+  -DCMAKE_CUDA_COMPILER="${CUDA_COMPILER:-/usr/local/cuda-12.2/bin/nvcc}" \
+  -DCUDAToolkit_ROOT="${CUDAToolkit_ROOT:-/usr/local/cuda-12.2}" \
   -DLLAMA_BUILD_EXAMPLES=OFF \
   -DLLAMA_BUILD_TESTS=OFF
-make -j$(nproc)
+make -j"$(nproc)"
 
 echo "🔧 [2/4] Compilando llama.cpp-latest (CPU)..."
 cd "$LLAMA_DIR"
@@ -33,7 +43,7 @@ cmake .. \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
   -DLLAMA_BUILD_EXAMPLES=OFF \
   -DLLAMA_BUILD_TESTS=OFF
-make -j$(nproc)
+make -j"$(nproc)"
 
 # ============================================================
 # STEP 2: Compile polaris_core (GPU + CPU)
@@ -45,13 +55,13 @@ cd "$POLARIS_DIR"
 # GPU build
 rm -rf build-gpu && mkdir build-gpu && cd build-gpu
 cmake "$POLARIS_DIR" -DPOLARIS_ENABLE_CUDA=ON
-make -j$(nproc)
+make -j"$(nproc)"
 
 # CPU build
 cd "$POLARIS_DIR"
 rm -rf build-cpu && mkdir build-cpu && cd build-cpu
 cmake "$POLARIS_DIR" -DPOLARIS_ENABLE_CUDA=OFF
-make -j$(nproc)
+make -j"$(nproc)"
 
 # ============================================================
 # STEP 3: Copy artifacts to polaris-v3-api

@@ -1,6 +1,7 @@
 # Polaris Core — C++ Binding for llama.cpp
 
-> An **ultra-optimized** integration between C++ (llama.cpp) and Python, created by the Polaris team to run AI models with maximum performance.
+> Deterministic LLM engine: a C++ binding for llama.cpp consumed by Python agents via pybind11.
+> Supports the [XCT Protocol](https://github.com/Tech-Tweakers/xct) with JSON early-stop, grammar-constrained decoding and streaming callbacks.
 
 🔗 **Protocol:** [XCT — Execution Control Transfer](https://github.com/Tech-Tweakers/xct)
 
@@ -156,15 +157,15 @@ sudo apt-get install -y \
 ### Build
 
 ```bash
-# 1. Configure
-cd /path/to/polaris-core-cpp/polaris
+# 1. Configure (POLARIS_LLAMA_ROOT defaults to ../llama.cpp-latest)
+cd /path/to/polaris-core
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 
 # 2. Compile
-make -C build
+cmake --build build --parallel
 
 # 3. Result
-ls -lh build/lib/polaris_core.*.so
+ls -lh build/polaris_core.*.so
 ```
 
 ### Deploy
@@ -233,6 +234,9 @@ export POLARIS_UBATCH=128
 # Context safety margin
 export POLARIS_SAFETY=16
 
+# Include special tokens in token_to_piece output
+export POLARIS_SPECIAL=true
+
 # Streaming flush size (bytes)
 export POLARIS_FLUSH=64
 
@@ -244,6 +248,9 @@ export POLARIS_MS_FLUSH=100
 
 # Debug stages (prompt/tokenize/prefill/sample/piece/push)
 export POLARIS_STAGE=prompt
+
+# Override the llama.cpp source tree used by CMake
+export POLARIS_LLAMA_ROOT=/path/to/llama.cpp
 ```
 
 ### Diagnostics

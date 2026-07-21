@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck scripts
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck build-polaris-core.sh copy-to-project.sh scripts/*.sh xct-server/*.sh
+      - name: Python lint / tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest ruff mypy
+      - name: Ruff
+        run: ruff check .
+      - name: MyPy
+        run: mypy --ignore-missing-imports .
+      - name: Pytest
+        run: pytest tests/
+
+  build:
+    runs-on: ubuntu-latest
+    # Build requires a pre-compiled llama.cpp and pybind11, which are not
+    # present in standard runners. Enable this job when POLARIS_LLAMA_ROOT is
+    # available in self-hosted runners.
+    if: github.repository == 'Tech-Tweakers/polaris-core' && contains(github.event.head_commit.message, '[build]')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential python3-dev pybind11-dev libcurl4-openssl-dev
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel

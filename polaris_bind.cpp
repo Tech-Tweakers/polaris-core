@@ -45,6 +45,14 @@ struct PolarisEngine {
         return defv;
     }
 
+    static bool env_bool(const char *k, bool defv) {
+        const char *v = std::getenv(k);
+        if (!v) return defv;
+        std::string s(v);
+        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        return s == "1" || s == "true" || s == "yes" || s == "on";
+    }
+
     PolarisEngine(const std::string & model_path,
                 int n_ctx = 4096,
                 int n_threads = 0,
@@ -84,6 +92,7 @@ struct PolarisEngine {
         // batch & ubatch
         params.n_batch  = env_int("POLARIS_BATCH", 256);
         params.n_ubatch = env_int("POLARIS_UBATCH", 128);
+        params.special  = env_bool("POLARIS_SPECIAL", true);
         safety_margin   = env_int("POLARIS_SAFETY", 16);
 
         // init llama.cpp backend
@@ -168,15 +177,8 @@ struct PolarisEngine {
             const char* v = std::getenv(k);
             return v ? std::string(v) : std::string();
         };
-        auto getenv_bool = [&](const char* k, bool defv) -> bool {
-            const char* v = std::getenv(k);
-            if (!v) return defv;
-            std::string s(v);
-            std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-            return (s=="1"||s=="true"||s=="yes"||s=="on");
-        };
 
-        const bool reset_kv = getenv_bool("POLARIS_RESET_KV", true);
+        const bool reset_kv = env_bool("POLARIS_RESET_KV", true);
 
         if (reset_kv) {
             auto * mem = llama_get_memory(ctx);
@@ -184,8 +186,6 @@ struct PolarisEngine {
             n_past = 0;
         }
 
-        const bool disable_tmpl  = getenv_bool("POLARIS_DISABLE_TEMPLATE", false);
-        const bool force_no_spec = !getenv_bool("POLARIS_USE_SPECIALS", true);
         const std::string STAGE  = getenv_str("POLARIS_STAGE"); // "", "prompt","tokenize","prefill","sample","piece","push"
 
         params.n_predict                 = n_predict > 0 ? n_predict : 256;
@@ -269,8 +269,8 @@ struct PolarisEngine {
         // - specials ON
         // - BOS conforme vocab (false)
 
-        const bool use_specials = true;        // Qwen precisa disso
-        const bool add_bos_tok = llama_vocab_get_add_bos(vocab); // vai dar false
+        const bool use_specials = params.special;
+        const bool add_bos_tok = llama_vocab_get_add_bos(vocab);
 
         LOG_INF("tokenize: use_specials=%d | add_bos=%d\n",
         (int)use_specials, (int)add_bos_tok);
@@ -300,6 +300,19 @@ struct PolarisEngine {
 
             py::gil_scoped_release release;
 
+            auto make_batch = [&](int n, int offset) {
+                llama_batch batch = llama_batch_init(n, 0, 1);
+                batch.n_tokens = n;
+                for (int k = 0; k < n; ++k) {
+                    batch.token[k]     = toks[offset + k];
+                    batch.pos[k]       = (int) (n_past + k);
+                    batch.logits[k]    = (k == n - 1);
+                    batch.n_seq_id[k]  = 1;
+                    batch.seq_id[k][0] = 0; // seq única
+                }
+                return batch;
+            };
+
             for (int i = 0; i < (int) toks.size(); ) {
                 int room = n_ctx_here - safety_margin - (int) n_past;
                 if (room <= 0) {
@@ -310,16 +323,7 @@ struct PolarisEngine {
 
                 int n_eval = std::min({ (int) toks.size() - i, ubatch, room });
 
-                // cria batch com capacidade n_eval, 0 emb, 1 seq
-                llama_batch batch = llama_batch_init(n_eval, 0, 1);
-                batch.n_tokens = n_eval;
-                for (int k = 0; k < n_eval; ++k) {
-                    batch.token[k]     = toks[i + k];
-                    batch.pos[k]       = (int) (n_past + k);
-                    batch.logits[k]    = (k == n_eval - 1);
-                    batch.n_seq_id[k]  = 1;
-                    batch.seq_id[k][0] = 0; // seq única
-                }
+                llama_batch batch = make_batch(n_eval, i);
 
                 bool ok = false;
                 int  try_ub = n_eval;
@@ -332,21 +336,14 @@ struct PolarisEngine {
                     // backoff: diminui o tamanho do batch
                     llama_batch_free(batch);
 
-                    try_ub = std::max(MIN_UB, try_ub/2);
-                    if (try_ub == n_eval) {
-                        throw std::runtime_error("llama_decode falhou (mesmo após backoff)");
+                    try_ub = std::max(MIN_UB, try_ub / 2);
+                    int next_n_eval = std::min(try_ub, room);
+                    if (next_n_eval >= n_eval) {
+                        throw std::runtime_error("llama_decode falhou (backoff esgotado)");
                     }
+                    n_eval = next_n_eval;
 
-                    n_eval = std::min(try_ub, room);
-                    batch  = llama_batch_init(n_eval, 0, 1);
-                    batch.n_tokens = n_eval;
-                    for (int k = 0; k < n_eval; ++k) {
-                        batch.token[k]     = toks[i + k];
-                        batch.pos[k]       = (int) (n_past + k);
-                        batch.logits[k]    = (k == n_eval - 1);
-                        batch.n_seq_id[k]  = 1;
-                        batch.seq_id[k][0] = 0;
-                    }
+                    batch = make_batch(n_eval, i);
                 }
 
                 llama_batch_free(batch);
@@ -386,13 +383,9 @@ struct PolarisEngine {
                 if (tok_call_start >= 0 && tok_call_end >= 0) break;
             }
         }
-        bool in_tool_call = false;   // estamos DENTRO de um bloco de chamada?
-        int  tool_calls_seen = 0;
-        // Canal separado: o conteúdo da chamada NÃO entra no stream de texto.
-        // É o que os provedores fazem — o usuário vê prosa, a chamada vai como
-        // dado estruturado. Sem isso o JSON aparece no chat (e, quando a
-        // geração é cortada, aparece pela metade).
-        std::string tool_buf;
+        // Tool-call tokens são detectados mas, por enquanto, seguem no fluxo de
+        // texto normal: separá-los de verdade exige protocolar o canal de
+        // streaming. A detecção por token continua aqui para logs futuros.
         for (auto t : embd_inp) common_sampler_accept(smpl.get(), t, /*grammar*/false);
         if (STAGE == "prefill") return std::string("[OK] prefill in ") + std::to_string(prefill_sec) + "s";
 
@@ -438,8 +431,8 @@ struct PolarisEngine {
         const int    TOK_FLUSH    = env_int("POLARIS_TOKFLUSH",          1);  // a cada N tokens
         const int    MS_FLUSH     = env_int("POLARIS_MS_FLUSH",        100);  // flush temporal (ms)
 
-        auto flush_cb = [&](bool /*force*/=false) {
-            if (!py_callback.is_none() && (!buf.empty())) {
+        auto flush_cb = [&](bool force=false) {
+            if (!py_callback.is_none() && (!buf.empty() || force)) {
                 py::gil_scoped_acquire acquire;
                 py::bytes b(buf.data(), (py::ssize_t) buf.size());
                 py_callback(b);
@@ -457,7 +450,7 @@ struct PolarisEngine {
         int steps = 0;
 
         auto json_complete = [](const std::string &s) -> bool {
-            int braces = 0;
+            int braces = 0, brackets = 0;
             bool in_str = false;
             bool esc = false;
             bool started = false;
@@ -472,16 +465,13 @@ struct PolarisEngine {
                 }
                 if (in_str) continue;
 
-                if (c == '{') {
-                    braces++;
-                    started = true;
-                }
-                if (c == '}') {
-                    braces--;
-                }
+                if (c == '{') { braces++; started = true; }
+                else if (c == '}') { braces--; }
+                else if (c == '[') { brackets++; started = true; }
+                else if (c == ']') { brackets--; }
             }
 
-            return started && braces == 0 && !in_str;
+            return started && braces == 0 && brackets == 0 && !in_str;
         };
 
 
@@ -502,13 +492,10 @@ struct PolarisEngine {
                 break;
             }
 
-            // Tool-call por TOKEN, não por texto: quando o modelo emite o
-            // token <tool_call>, sabemos ali mesmo que começou uma chamada — sem
-            // procurar a string depois nem torcer pra ele fechar o bloco. É
-            // assim que a chamada deixa de ser "texto que parece uma chamada" e
-            // vira sinal estruturado, como fazem os provedores de nuvem.
-            if (id == tok_call_start) { in_tool_call = true;  tool_calls_seen++; }
-            else if (id == tok_call_end) { in_tool_call = false; }
+            // Tool-call por TOKEN: detectamos os tokens especiais se existirem
+            // no vocabulário. Por hora o conteúdo segue no fluxo de texto; a
+            // separação estruturada exige protocolar o stream no cliente.
+            (void)tok_call_start; (void)tok_call_end;
 
             // convert token -> text piece
             std::string piece = common_token_to_piece(ctx, id, params.special);
@@ -523,35 +510,37 @@ struct PolarisEngine {
             // fluxo normal, na ordem gerada. A separação real exige tratar o
             // protocolo inteiro (stream + final), não só a saída.
 
+            buf += piece;
+            out += piece;
+
+            // STOP cedo do XCT: procura sinalizadores e só para quando o JSON
+            // estiver balanceado. Isso evita parada no meio de uma string
+            // que por acaso contenha "done".
+            bool has_key =
+                (out.find("\"done\"")      != std::string::npos) ||
+                (out.find("\"next_step\"") != std::string::npos);
+
+            if (has_key && json_complete(out)) {
+                flush_cb(true);
+                break;
+            }
+
+            // flushing streaming
             if (!py_callback.is_none()) {
-
-                buf += piece;
-                out += piece;
-
-                // STOP cedo do XCT
-                bool has_key =
-                    (out.find("\"done\"")      != std::string::npos) ||
-                    (out.find("\"next_step\"") != std::string::npos);
-
-                if (has_key && json_complete(out)) {
-                    flush_cb(true);
-                    break;
+                bool by_bytes = buf.size() >= FLUSH_BYTES;
+                bool by_toks  = (TOK_FLUSH > 0) && (++tok_since_flush >= (size_t)TOK_FLUSH);
+                bool by_time  = false;
+                if (MS_FLUSH > 0) {
+                    auto now = std::chrono::steady_clock::now();
+                    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - t_last_flush).count() >= MS_FLUSH) {
+                        by_time = true;
+                        t_last_flush = now;
+                    }
                 }
 
-            } else {
-
-                out += piece;
-
-                // STOP cedo do XCT
-                bool has_key =
-                    (out.find("\"done\"")      != std::string::npos) ||
-                    (out.find("\"next_step\"") != std::string::npos);
-
-                bool closed_json =
-                    (out.find("}") != std::string::npos);
-
-                if (has_key && json_complete(out)) {
-                    break;
+                if (by_bytes || by_toks || by_time) {
+                    flush_cb();
+                    tok_since_flush = 0;
                 }
             }
 

@@ -13,7 +13,12 @@ base-models/
 dataset*
 
 .claude/build/
+build/
 build-cpu/
 build-gpu/
+*.egg-info/
+dist/
 *.slim-quebrado
 *.bak-*
+.venv/
+venv/
