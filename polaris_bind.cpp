@@ -107,7 +107,7 @@ struct PolarisEngine {
             throw std::runtime_error("Falha ao inicializar sampler");
     }
 
-    struct SamplerCfg { float temp, top_p, rep, topk, minp, freq, pres; int seed; };
+    struct SamplerCfg { float temp, top_p, rep, topk, minp, freq, pres; int seed; std::string grammar; };
     SamplerCfg last_cfg{ -1.f, -1.f, -1.f, -1.f, -1.f, -1.f, -1.f, -1 };
 
     std::string generate(const std::string & prompt,
@@ -121,6 +121,7 @@ struct PolarisEngine {
                          double penalty_freq,
                          double penalty_present,
                          int    seed,
+                         const std::string & grammar,
                          py::object py_callback) {
         std::lock_guard<std::mutex> lock(mtx);
 
@@ -159,6 +160,15 @@ struct PolarisEngine {
         params.sampling.penalty_present  = (float)(penalty_present >= 0.0 ? penalty_present : 0.0);
         if (seed >= 0) params.sampling.seed = (uint32_t)seed;
 
+        // Grammar (GBNF): quando o cliente manda, o sampler ZERA a probabilidade
+        // de qualquer token que quebre a gramática — o modelo fica IMPEDIDO de
+        // emitir formato inválido, em vez de a gente pedir por favor no prompt e
+        // torcer. É assim que os provedores de nuvem garantem tool-call bem
+        // formado. A Polaris não sabe o que a gramática significa (pode ser
+        // tool-call, JSON, o que for): ela só constrange. Quem conhece as tools
+        // é o cliente (o XCT vive lá).
+        params.sampling.grammar = grammar;
+
         SamplerCfg cfg{
             params.sampling.temp,
             params.sampling.top_p,
@@ -167,12 +177,14 @@ struct PolarisEngine {
             params.sampling.min_p,
             params.sampling.penalty_freq,
             params.sampling.penalty_present,
-            seed
+            seed,
+            grammar
         };
         if (!smpl || cfg.temp != last_cfg.temp || cfg.top_p != last_cfg.top_p ||
             cfg.rep != last_cfg.rep || cfg.topk != last_cfg.topk ||
             cfg.minp != last_cfg.minp || cfg.freq != last_cfg.freq ||
-            cfg.pres != last_cfg.pres || cfg.seed != last_cfg.seed) {
+            cfg.pres != last_cfg.pres || cfg.seed != last_cfg.seed ||
+            cfg.grammar != last_cfg.grammar) {
             smpl.reset(common_sampler_init(model, params.sampling));
             if (!smpl) throw std::runtime_error("Falha ao (re)configurar sampler");
             last_cfg = cfg;
@@ -311,6 +323,10 @@ struct PolarisEngine {
         LOG_INF("prefill: %zu toks em %.3fs (%.1f tok/s)\n",
                 embd_inp.size(), prefill_sec,
                 embd_inp.size() ? (embd_inp.size()/std::max(1e-9, prefill_sec)) : 0.0);
+        // accept_grammar: precisa ser true quando há gramática, senão o estado dela
+        // não avança e o constraint não vale. No prompt (embd_inp) segue false —
+        // a gramática vale para o que o MODELO gera, não para o que ele leu.
+        const bool use_grammar = !grammar.empty();
         for (auto t : embd_inp) common_sampler_accept(smpl.get(), t, /*grammar*/false);
         if (STAGE == "prefill") return std::string("[OK] prefill in ") + std::to_string(prefill_sec) + "s";
 
@@ -413,7 +429,7 @@ struct PolarisEngine {
             }
 
             // accept sampled token
-            common_sampler_accept(smpl.get(), id, /*grammar*/false);
+            common_sampler_accept(smpl.get(), id, /*grammar*/use_grammar);
 
             // stop if end-of-generation token
             if (llama_vocab_is_eog(vocab, id)) {
@@ -519,6 +535,7 @@ PYBIND11_MODULE(polaris_core, m) {
              py::arg("penalty_freq")     = 0.0,
              py::arg("penalty_present")  = 0.0,
              py::arg("seed")             = -1,
+             py::arg("grammar")          = "",
              py::arg("callback")         = py::none(),
              "Gera texto; se callback for passado, faz streaming por chunk.");
 }
