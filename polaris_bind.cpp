@@ -18,6 +18,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <algorithm>
+#include <utility>
 #include <cstdlib>   // getenv
 #include <chrono>    // métricas / timer de flush
 #include <cctype>    // tolower
@@ -111,6 +112,12 @@ struct PolarisEngine {
     struct SamplerCfg { float temp, top_p, rep, topk, minp, freq, pres; int seed; std::string grammar; };
     SamplerCfg last_cfg{ -1.f, -1.f, -1.f, -1.f, -1.f, -1.f, -1.f, -1 };
 
+    // generate: a forma antiga (system + um unico user). Mantida porque e assim
+    // que metade das chamadas ja existe. Por baixo delega pro caminho novo.
+    // ChatMsg: uma mensagem com o papel preservado. E um std::pair de proposito:
+    // pybind11/stl.h converte tupla/lista do Python direto, sem registrar tipo.
+    using ChatMsg = std::pair<std::string, std::string>;  // (role, content)
+
     std::string generate(const std::string & prompt,
                          const std::string & system_prompt,
                          int n_predict,
@@ -124,6 +131,36 @@ struct PolarisEngine {
                          int    seed,
                          const std::string & grammar,
                          py::object py_callback) {
+        std::vector<ChatMsg> msgs;
+        if (!system_prompt.empty()) msgs.emplace_back("system", system_prompt);
+        msgs.emplace_back("user", prompt);
+        return generate_chat(msgs, n_predict, temperature, top_p, repeat_penalty,
+                             top_k, min_p, penalty_freq, penalty_present, seed,
+                             grammar, py_callback);
+    }
+
+    // generate_chat: a conversa com os PAPEIS preservados.
+    //
+    // Por que existe: antes o historico inteiro — os turnos anteriores, as
+    // chamadas que o proprio modelo fez, os resultados que voltaram — era
+    // concatenado DENTRO de um unico <|im_start|>user. O modelo nao tinha como
+    // saber que ELE havia feito aquelas chamadas: pra ele o usuario escreveu um
+    // texto gigante que por acaso continha tool_calls. Consequencia medida em
+    // 20-21/07: ele nao percebia que ja tinha investigado e seguia pedindo tool
+    // pra sempre, e a regra do system afundava a tres turnos de distancia
+    // dentro do mesmo bloco. Um bloco ChatML por mensagem devolve o turno.
+    std::string generate_chat(const std::vector<ChatMsg> & messages,
+                              int n_predict,
+                              double temperature,
+                              double top_p,
+                              double repeat_penalty,
+                              int    top_k,
+                              double min_p,
+                              double penalty_freq,
+                              double penalty_present,
+                              int    seed,
+                              const std::string & grammar,
+                              py::object py_callback) {
         std::lock_guard<std::mutex> lock(mtx);
 
         // --- helpers ENV / flags de diagnóstico ---
@@ -200,15 +237,18 @@ struct PolarisEngine {
 
         std::string prompt_text;
 
-        if (!system_prompt.empty()) {
-            prompt_text += "<|im_start|>system\n";
-            prompt_text += system_prompt;
+        for (const auto & m : messages) {
+            if (m.second.empty()) continue;
+            // Papel fora do ChatML vira "user": o Qwen so conhece
+            // system/user/assistant, e um papel inventado quebra o trilho.
+            std::string role = m.first;
+            if (role != "system" && role != "user" && role != "assistant") role = "user";
+            prompt_text += "<|im_start|>";
+            prompt_text += role;
+            prompt_text += "\n";
+            prompt_text += m.second;
             prompt_text += "\n<|im_end|>\n";
         }
-
-        prompt_text += "<|im_start|>user\n";
-        prompt_text += prompt;
-        prompt_text += "\n<|im_end|>\n";
 
         prompt_text += "<|im_start|>assistant\n";
 
@@ -581,5 +621,23 @@ PYBIND11_MODULE(polaris_core, m) {
              py::arg("seed")             = -1,
              py::arg("grammar")          = "",
              py::arg("callback")         = py::none(),
-             "Gera texto; se callback for passado, faz streaming por chunk.");
+             "Gera texto; se callback for passado, faz streaming por chunk.")
+        .def("generate_chat",
+             &PolarisEngine::generate_chat,
+             py::arg("messages"),
+             py::arg("n_predict")        = 256,
+             py::arg("temperature")      = 0.7,
+             py::arg("top_p")            = 0.9,
+             py::arg("repeat_penalty")   = 1.1,
+             py::arg("top_k")            = 40,
+             py::arg("min_p")            = 0.05,
+             py::arg("penalty_freq")     = 0.0,
+             py::arg("penalty_present")  = 0.0,
+             py::arg("seed")             = -1,
+             py::arg("grammar")          = "",
+             py::arg("callback")         = py::none(),
+             "Gera a partir da conversa com PAPEIS preservados: messages e uma "
+             "lista de (role, content), role em {system,user,assistant}. Cada "
+             "mensagem vira seu proprio bloco ChatML em vez de tudo virar um "
+             "unico <|im_start|>user.");
 }
